@@ -33,7 +33,7 @@ export class RestAPIStack extends cdk.Stack {
         memorySize: 128,
         environment: {
           TABLE_NAME: moviesTable.tableName,
-          REGION: 'eu-west-1',
+          REGION: cdk.Aws.REGION,
         },
       }
       );
@@ -49,7 +49,7 @@ export class RestAPIStack extends cdk.Stack {
           memorySize: 128,
           environment: {
             TABLE_NAME: moviesTable.tableName,
-            REGION: 'eu-west-1',
+            REGION: cdk.Aws.REGION,
           },
         }
         );

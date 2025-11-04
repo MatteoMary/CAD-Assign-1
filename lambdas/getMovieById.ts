@@ -73,3 +73,5 @@ function createDDbDocClient() {
   return DynamoDBDocumentClient.from(ddbClient, translateConfig);
 }
 
+
+

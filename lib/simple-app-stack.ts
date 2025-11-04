@@ -48,16 +48,26 @@ export class SimpleAppStack extends cdk.Stack {
       }
     );
 
-    const getMovieByIdURL = getMovieByIdFn.addFunctionUrl({
-      authType: lambda.FunctionUrlAuthType.NONE,
-      cors: {
-        allowedOrigins: ["*"],
+    const getAllMoviesFn = new lambdanode.NodejsFunction(this, "GetAllMoviesFn", {
+      architecture: lambda.Architecture.ARM_64,
+      runtime: lambda.Runtime.NODEJS_18_X,
+      entry: `${__dirname}/../lambdas/getAllMovies.ts`,
+      timeout: cdk.Duration.seconds(10),
+      memorySize: 128,
+      environment: {
+        TABLE_NAME: moviesTable.tableName,
+        REGION: cdk.Aws.REGION,
       },
     });
 
-    moviesTable.grantReadData(getMovieByIdFn)
+    const getAllMoviesURL = getAllMoviesFn.addFunctionUrl({
+      authType: lambda.FunctionUrlAuthType.NONE, 
+      cors: { allowedOrigins: ["*"] },
+    });
 
-    new cdk.CfnOutput(this, "Get Movie Function Url", { value: getMovieByIdURL.url });
+    moviesTable.grantReadData(getAllMoviesFn)
+
+    new cdk.CfnOutput(this, "Get All Movies Function Url", { value: getAllMoviesURL.url });
 
 
 new custom.AwsCustomResource(this, "moviesddbInitData", {

@@ -75,6 +75,7 @@ export class RestAPIStack extends cdk.Stack {
         moviesTable.grantReadData(getMovieByIdFn)
         moviesTable.grantReadData(getAllMoviesFn)
         
+        
         const api = new apig.RestApi(this, "RestAPI", {
       description: "demo api",
       deployOptions: {

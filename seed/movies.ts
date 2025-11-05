@@ -323,7 +323,7 @@ export const movies : Movie[] = [
   }
 ]
 
-export const movieCasts: MovieCasts[] = [
+export const movieCasts: MovieCast[] = [
  {
     movieId: 1234,
     actorName: "Joe Bloggs",

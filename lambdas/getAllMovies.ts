@@ -1,27 +1,40 @@
-import { APIGatewayProxyHandlerV2, APIGatewayProxyResultV2 } from "aws-lambda";
+import { APIGatewayProxyHandlerV2 } from "aws-lambda";  // CHANGED
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { DynamoDBDocumentClient, ScanCommand, ScanCommandOutput } from "@aws-sdk/lib-dynamodb";
 
-const ddbDocClient = createDDbDocClient();
+const ddbClient = new DynamoDBClient({ region: process.env.REGION });
 
-export const handler: APIGatewayProxyHandlerV2 = async (): Promise<APIGatewayProxyResultV2> => {
+export const handler: APIGatewayProxyHandlerV2 = async (event, context) => { // CHANGED
   try {
-    const tableName = process.env.TABLE_NAME!;
-    let items: any[] = [];
-    let ExclusiveStartKey: Record<string, any> | undefined = undefined;
+    // Print Event
+    console.log("Event: ", event);
 
-    do {
-      const out: ScanCommandOutput = await ddbDocClient.send(
-        new ScanCommand({
-          TableName: tableName,
-          ExclusiveStartKey,
-        })
-      );
-      if (out.Items) items = items.concat(out.Items);
-      ExclusiveStartKey = out.LastEvaluatedKey;
-    } while (ExclusiveStartKey);
+    const commandOutput = await ddbClient.send(
+      new ScanCommand({
+        TableName: process.env.TABLE_NAME,
+      })
+    );
+    if (!commandOutput.Items) {
+      return {
+        statusCode: 404,
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ Message: "Invalid movie Id" }),
+      };
+    }
+    const body = {
+      data: commandOutput.Items,
+    };
 
-    return json(200, { data: items });
+    // Return Response
+    return {
+      statusCode: 200,
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify(body),
+    };
   } catch (error: any) {
     console.log("Error scanning table:", JSON.stringify(error));
     return json(500, { error: "Failed to scan table" });

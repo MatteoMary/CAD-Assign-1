@@ -83,21 +83,18 @@ export class SimpleAppStack extends cdk.Stack {
 
     new cdk.CfnOutput(this, "Get All Movies Function Url", { value: getAllMoviesURL.url });
 
-    const getMovieCastMembersFn = new lambdanode.NodejsFunction(
-      this,
-      "GetCastMemberFn",
- {
-        architecture: lambda.Architecture.ARM_64,
-        runtime: lambda.Runtime.NODEJS_16_X,
-        entry: `${__dirname}/../lambdas/getMovieCastMembers.ts`,
-        timeout: cdk.Duration.seconds(10),
-        memorySize: 128,
-        environment: {
-          CAST_TABLE_NAME: movieCastsTable.tableName,
-          REGION: cdk.Aws.REGION,
- },
- }
- );
+const getMovieCastMembersFn = new lambdanode.NodejsFunction(this, "GetCastMemberFn", {
+  architecture: lambda.Architecture.ARM_64,
+  runtime: lambda.Runtime.NODEJS_18_X,
+  entry: `${__dirname}/../lambdas/getMovieCastMembers.ts`,
+  timeout: cdk.Duration.seconds(10),
+  memorySize: 128,
+  environment: {
+    CAST_TABLE_NAME: movieCastsTable.tableName,
+    MOVIES_TABLE_NAME: moviesTable.tableName,
+    REGION: cdk.Aws.REGION,
+  },
+});
 
     const getMovieCastMembersURL = getMovieCastMembersFn.addFunctionUrl({
       authType: lambda.FunctionUrlAuthType.NONE,
@@ -107,7 +104,7 @@ export class SimpleAppStack extends cdk.Stack {
  }); 
 
 movieCastsTable.grantReadData(getMovieCastMembersFn);
-
+moviesTable.grantReadData(getMovieCastMembersFn);
 
     new custom.AwsCustomResource(this, "moviesddbInitData", {
       onCreate: {

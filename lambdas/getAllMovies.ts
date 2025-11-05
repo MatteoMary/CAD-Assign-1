@@ -1,6 +1,6 @@
 import { APIGatewayProxyHandlerV2, APIGatewayProxyResultV2 } from "aws-lambda";
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
-import { DynamoDBDocumentClient, ScanCommand } from "@aws-sdk/lib-dynamodb";
+import { DynamoDBDocumentClient, ScanCommand, ScanCommandOutput } from "@aws-sdk/lib-dynamodb";
 
 const ddbDocClient = createDDbDocClient();
 
@@ -11,7 +11,7 @@ export const handler: APIGatewayProxyHandlerV2 = async (): Promise<APIGatewayPro
     let ExclusiveStartKey: Record<string, any> | undefined = undefined;
 
     do {
-      const out = await ddbDocClient.send(
+      const out: ScanCommandOutput = await ddbDocClient.send(
         new ScanCommand({
           TableName: tableName,
           ExclusiveStartKey,

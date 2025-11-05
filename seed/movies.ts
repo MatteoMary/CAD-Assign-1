@@ -1,4 +1,4 @@
-import {Movie, MovieCast} from '../shared/types'
+import {Movie, MovieCasts} from '../shared/types'
 
 export const movies : Movie[] = [
   {
@@ -323,7 +323,7 @@ export const movies : Movie[] = [
   }
 ]
 
-export const movieCasts: MovieCast[] = [
+export const movieCasts: MovieCasts[] = [
  {
     movieId: 1234,
     actorName: "Joe Bloggs",

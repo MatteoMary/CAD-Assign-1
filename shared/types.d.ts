@@ -16,11 +16,11 @@ export type Movie =   {
   vote_average: number,
   vote_count: number
 }
-export type MovieCasts = {
-  Movieid: number,
-  cast_id: number,
-  character: string,
-  credit_id: string,
-}  
+export type MovieCast = {
+  movieId: number;
+  actorName: string;
+  roleName: string;
+  roleDescription: string;
+};
 
  

@@ -25,12 +25,10 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
         new DeleteCommand({
           TableName: process.env.TABLE_NAME,
           Key: { id },
-          // prevent deleting a non-existent movie gives 404 instead of silent 200
           ConditionExpression: "attribute_exists(id)",
         })
       );
     } catch (err: any) {
-      // ConditionalCheckFailedException means no item with that id
       if (err?.name === "ConditionalCheckFailedException") {
         return json(404, { message: `Movie ${id} not found` });
       }
@@ -38,7 +36,6 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
       return json(500, { message: "Failed to delete movie" });
     }
 
-    // 204 No Content is idiomatic for a successful delete
     return json(200, { message: "Delete successful", id });
   } catch (err) {
     console.error("Unhandled error:", err);

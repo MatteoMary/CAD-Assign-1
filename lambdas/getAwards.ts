@@ -1,64 +1,78 @@
-import { APIGatewayProxyHandlerV2, APIGatewayProxyResultV2 } from "aws-lambda";
+import { APIGatewayProxyHandlerV2 } from "aws-lambda";
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
-import { DynamoDBDocumentClient, QueryCommand } from "@aws-sdk/lib-dynamodb";
+import { DynamoDBDocumentClient, QueryCommand, QueryCommandInput } from "@aws-sdk/lib-dynamodb";
 
-const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({ region: process.env.REGION }));
+const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({ region: process.env.REGION }), {
+  marshallOptions: { convertEmptyValues: true, removeUndefinedValues: true, convertClassInstanceToMap: true },
+  unmarshallOptions: { wrapNumbers: false },
+});
 
-export const handler: APIGatewayProxyHandlerV2 = async (event): Promise<APIGatewayProxyResultV2> => {
-    try {
-    console.log("[AWARDS EVENT]", JSON.stringify(event));
+export const handler: APIGatewayProxyHandlerV2 = async (event) => {
+
+  try {
     const qs = event.queryStringParameters ?? {};
-
-    const movie = qs.movie?.trim();
-    const actor = qs.actor?.trim();
-    const awardBody = qs.awardBody?.trim();
+    const movie = qs.movie ? Number(qs.movie) : undefined;
+    const actor = qs.actor ? Number(qs.actor) : undefined;
+    const awardBody = qs.awardBody;
 
     if (!movie && !actor) {
-      return json(400, { message: "Provide ?movie or ?actor" });
+      return json(400, { message: "Provide 'movie' or 'actor' query parameter" });
     }
 
-    const pkId = movie ?? actor!;
-    if (!/^\d+$/.test(pkId)) {
-      return json(400, { message: "movie/actor must be numeric" });
+    let input: QueryCommandInput;
+
+    if (movie) {
+      if (awardBody) {
+        input = {
+          TableName: process.env.AWARDS_TABLE_NAME,
+          KeyConditionExpression: "entityId = :e AND awardBody = :b",
+          ExpressionAttributeValues: { ":e": movie, ":b": awardBody },
+          FilterExpression: actor ? "actorId = :a" : undefined,
+          ...(actor ? { ExpressionAttributeValuesAdditional: { ":a": actor } as any } : {}),
+        } as any;
+      } else {
+        input = {
+          TableName: process.env.AWARDS_TABLE_NAME,
+          KeyConditionExpression: "entityId = :e",
+          ExpressionAttributeValues: { ":e": movie, ...(actor ? { ":a": actor } : {}) },
+          FilterExpression: actor ? "actorId = :a" : undefined,
+        };
+      }
+    } else {
+      if (awardBody) {
+        input = {
+          TableName: process.env.AWARDS_TABLE_NAME,
+          KeyConditionExpression: "entityId = :e AND awardBody = :b",
+          ExpressionAttributeValues: { ":e": actor!, ":b": awardBody },
+          FilterExpression: movie ? "movieId = :m" : undefined,
+          ...(movie ? { ExpressionAttributeValuesAdditional: { ":m": movie } as any } : {}),
+        } as any;
+      } else {
+        input = {
+          TableName: process.env.AWARDS_TABLE_NAME,
+          KeyConditionExpression: "entityId = :e",
+          ExpressionAttributeValues: { ":e": actor!, ...(movie ? { ":m": movie } : {}) },
+          FilterExpression: movie ? "movieId = :m" : undefined,
+        };
+      }
     }
 
-    const params: any = {
-      TableName: process.env.TABLE_NAME,
-      KeyConditionExpression: "PK = :pk",
-      ExpressionAttributeValues: { ":pk": `w${pkId}` },
-    };
-
-    if (awardBody) {
-      params.KeyConditionExpression += " AND SK = :ab";
-      params.ExpressionAttributeValues[":ab"] = awardBody;
+    if ((input as any).ExpressionAttributeValuesAdditional) {
+      input.ExpressionAttributeValues = {
+        ...(input.ExpressionAttributeValues || {}),
+        ...(input as any).ExpressionAttributeValuesAdditional,
+      };
+      delete (input as any).ExpressionAttributeValuesAdditional;
     }
 
-    const out = await ddb.send(new QueryCommand(params));
-    logRequester(event, `/awards?${new URLSearchParams(qs as Record<string, string>).toString()}`);
-
+    const out = await ddb.send(new QueryCommand(input));
     return json(200, { data: out.Items ?? [] });
-  } catch (error) {
-    console.error("[AWARDS ERROR]", error);
-    return json(500, { error: "Failed to fetch awards" });
+  } catch (err) {
+    console.error("getAwards error:", err);
+    return json(500, { error: "Internal Server Error" });
   }
 };
 
-function json(statusCode: number, body: unknown): APIGatewayProxyResultV2 {
-  return {
-    statusCode,
-    headers: {
-      "content-type": "application/json",
-      "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Credentials": "true",
-    },
-    body: JSON.stringify(body),
-  };
-}
-
-function logRequester(event: any, path: string) {
-  const u =
-    event.requestContext?.authorizer?.context?.username ??
-    event.requestContext?.authorizer?.claims?.["cognito:username"] ??
-    "unknown";
-  console.log(`${u} ${path}`);
+function json(statusCode: number, body: unknown) {
+  return { statusCode, headers: { "content-type": "application/json" }, body: JSON.stringify(body) };
 }

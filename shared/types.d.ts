@@ -44,5 +44,12 @@ export type Movie =   {
     password: string;
   }
 
-
+export type Award = {
+  entityId: number;
+  awardBody: string;
+  category: string;
+  year: number;
+  movieId?: number;
+  actorId?: number;
+};
  

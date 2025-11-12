@@ -7,6 +7,7 @@ import * as apig from "aws-cdk-lib/aws-apigateway";
 import { Construct } from "constructs";
 import { generateBatch } from "../shared/util";
 import { movies, movieCasts } from "../seed/movies";
+import { awards } from "../seed/awards";
 
 export interface RestProps extends cdk.StackProps {
   userPoolId: string;
@@ -40,7 +41,7 @@ export class RestAPIStack extends cdk.Stack {
     const getMovieCastMembersFn = new lambdanode.NodejsFunction(this, "GetCastMemberFn", {
       architecture: lambda.Architecture.ARM_64,
       runtime: lambda.Runtime.NODEJS_18_X,
-      entry: `${__dirname}/../lambdas/getMovieCastMember.ts`,
+      entry: `${__dirname}/../lambdas/getMovieCastMembers.ts`,
       timeout: cdk.Duration.seconds(10),
       memorySize: 128,
       environment: {
@@ -53,7 +54,7 @@ export class RestAPIStack extends cdk.Stack {
     const getMovieCastMemberFn = new lambdanode.NodejsFunction(this, "GetMovieCastMemberFn", {
       architecture: lambda.Architecture.ARM_64,
       runtime: lambda.Runtime.NODEJS_18_X,
-     entry: `${__dirname}/../lambdas/getMovieCastMember.ts`, // singular file
+     entry: `${__dirname}/../lambdas/getMovieCastMember.ts`, 
      timeout: cdk.Duration.seconds(10),
       memorySize: 128,
       environment: {
@@ -110,6 +111,31 @@ export class RestAPIStack extends cdk.Stack {
       },
     });
 
+    
+
+    const awardsTable = new dynamodb.Table(this, "AwardsTable", {
+     billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      partitionKey: { name: "entityId",  type: dynamodb.AttributeType.NUMBER },
+     sortKey: { name: "awardBody", type: dynamodb.AttributeType.STRING },
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+      tableName: "Awards",
+    });
+
+    const getAwardsFn = new lambdanode.NodejsFunction(this, "GetAwardsFn", {
+     architecture: lambda.Architecture.ARM_64,
+      runtime: lambda.Runtime.NODEJS_18_X,
+      entry: `${__dirname}/../lambdas/getAwards.ts`,
+      timeout: cdk.Duration.seconds(10),
+      memorySize: 128,
+      environment: {
+        AWARDS_TABLE_NAME: awardsTable.tableName,
+        REGION: cdk.Aws.REGION,
+      },
+    });
+
+
+
+
     new custom.AwsCustomResource(this, "moviesddbInitData", {
       onCreate: {
         service: "DynamoDB",
@@ -127,6 +153,22 @@ export class RestAPIStack extends cdk.Stack {
       }),
     });
 
+    new custom.AwsCustomResource(this, "awardsInitData", {
+  onCreate: {
+    service: "DynamoDB",
+    action: "batchWriteItem",
+    parameters: {
+      RequestItems: {
+        [awardsTable.tableName]: generateBatch(awards),
+      },
+    },
+    physicalResourceId: custom.PhysicalResourceId.of("awardsInitData"),
+  },
+  policy: custom.AwsCustomResourcePolicy.fromSdkCalls({
+    resources: [awardsTable.tableArn],
+  }),
+});
+
     moviesTable.grantReadData(getMovieByIdFn);
     moviesTable.grantReadData(getAllMoviesFn);
     moviesTable.grantReadWriteData(newMovieFn);
@@ -134,7 +176,9 @@ export class RestAPIStack extends cdk.Stack {
     movieCastsTable.grantReadData(getMovieCastMembersFn);
     moviesTable.grantReadData(getMovieCastMembersFn);
     movieCastsTable.grantReadData(getMovieCastMembersFn);
-    movieCastsTable.grantReadData(getMovieCastMemberFn)
+    movieCastsTable.grantReadData(getMovieCastMemberFn);
+    awardsTable.grantReadData(getAwardsFn);
+
 
     const api = new apig.RestApi(this, "RestAPI", {
       description: "demo api",
@@ -171,23 +215,39 @@ export class RestAPIStack extends cdk.Stack {
     const movieCastEndpoint = moviesEndpoint.addResource("cast");
     const actorsEndpoint = movieEndpoint.addResource("actors");
     const actorEndpoint  = actorsEndpoint.addResource("{actorId}");
-    
+    const awardsEndpoint = api.root.addResource("awards");
+
 
 moviesEndpoint.addMethod("GET", new apig.LambdaIntegration(getAllMoviesFn, { proxy: true }), {
-  authorizer: requestAuthorizer, authorizationType: apig.AuthorizationType.CUSTOM, apiKeyRequired: false,
+  authorizer: requestAuthorizer,
+   authorizationType: apig.AuthorizationType.CUSTOM,
+    apiKeyRequired: false,
 });
 
 movieEndpoint.addMethod("GET", new apig.LambdaIntegration(getMovieByIdFn, { proxy: true }), {
-  authorizer: requestAuthorizer, authorizationType: apig.AuthorizationType.CUSTOM, apiKeyRequired: false,
+  authorizer: requestAuthorizer,
+   authorizationType: apig.AuthorizationType.CUSTOM,
+    apiKeyRequired: false,
 });
 
 actorsEndpoint.addMethod("GET", new apig.LambdaIntegration(getMovieCastMembersFn, { proxy: true }), {
-  authorizer: requestAuthorizer, authorizationType: apig.AuthorizationType.CUSTOM, apiKeyRequired: false,
+  authorizer: requestAuthorizer,
+   authorizationType: apig.AuthorizationType.CUSTOM,
+   apiKeyRequired: false,
 });
 
 actorEndpoint.addMethod("GET", new apig.LambdaIntegration(getMovieCastMemberFn, { proxy: true }), {
-  authorizer: requestAuthorizer, authorizationType: apig.AuthorizationType.CUSTOM, apiKeyRequired: false,
+  authorizer: requestAuthorizer,
+  authorizationType: apig.AuthorizationType.CUSTOM,
+  apiKeyRequired: false,
 });
+
+awardsEndpoint.addMethod("GET",new apig.LambdaIntegration(getAwardsFn, { proxy: true }),  {
+    authorizer: requestAuthorizer,
+    authorizationType: apig.AuthorizationType.CUSTOM,
+    apiKeyRequired: false,
+  }
+);
 
 moviesEndpoint.addMethod("POST", new apig.LambdaIntegration(newMovieFn, { proxy: true }), {
   apiKeyRequired: true,

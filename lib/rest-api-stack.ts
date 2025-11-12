@@ -191,6 +191,21 @@ export class RestAPIStack extends cdk.Stack {
       },
     });
 
+    const adminApiKey = api.addApiKey("AdminApiKey", {
+  apiKeyName: "MovieApiAdminKey",
+  description: "Administrator key for POST/DELETE on Movies API",
+});
+
+const adminPlan = api.addUsagePlan("AdminUsagePlan", {
+  name: "AdminUsagePlan",
+  throttle: { rateLimit: 20, burstLimit: 10 },
+  quota:    { limit: 100000, period: apig.Period.MONTH },
+});
+adminPlan.addApiStage({ stage: api.deploymentStage });
+adminPlan.addApiKey(adminApiKey);
+
+new cdk.CfnOutput(this, "AdminApiKeyId", { value: adminApiKey.keyId });
+
     const authorizerFn = new lambdanode.NodejsFunction(this, "MoviesAuthorizerFn", {
       architecture: lambda.Architecture.ARM_64,
       runtime: lambda.Runtime.NODEJS_18_X,

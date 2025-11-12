@@ -2,26 +2,32 @@ import { APIGatewayRequestAuthorizerHandler } from "aws-lambda";
 import { CookieMap, createPolicy, parseCookies, verifyToken } from "../utils";
 
 export const handler: APIGatewayRequestAuthorizerHandler = async (event) => {
-  console.log("[EVENT]", event);
+  console.log("[AUTHZ EVENT]", JSON.stringify({ path: event?.methodArn, headers: event?.headers }, null, 2));
 
   const cookies: CookieMap = parseCookies(event);
-
-  if (!cookies) {
+  if (!cookies || !cookies.token) {
     return {
       principalId: "",
       policyDocument: createPolicy(event, "Deny"),
+      context: { username: "" },
     };
   }
 
-  const verifiedJwt = await verifyToken(
+  const verified = await verifyToken(
     cookies.token,
     process.env.USER_POOL_ID,
     process.env.REGION!
   );
 
+  const username =
+    (verified && (verified as any)["cognito:username"]) ||
+    (verified && (verified as any).username) ||
+    (verified && (verified as any).email) ||
+    "";
+
   return {
-    principalId: verifiedJwt ? verifiedJwt.sub!.toString() : "",
-    policyDocument: createPolicy(event, verifiedJwt ? "Allow" : "Deny"),
+    principalId: verified?.sub ?? "",
+    policyDocument: createPolicy(event, verified ? "Allow" : "Deny"),
+    context: { username },
   };
 };
-

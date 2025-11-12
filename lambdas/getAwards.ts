@@ -5,7 +5,7 @@ import { DynamoDBDocumentClient, QueryCommand } from "@aws-sdk/lib-dynamodb";
 const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({ region: process.env.REGION }));
 
 export const handler: APIGatewayProxyHandlerV2 = async (event): Promise<APIGatewayProxyResultV2> => {
-  try {
+    try {
     console.log("[AWARDS EVENT]", JSON.stringify(event));
     const qs = event.queryStringParameters ?? {};
 

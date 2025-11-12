@@ -326,35 +326,41 @@ export const movies : Movie[] = [
 export const movieCasts: MovieCast[] = [
   {
     movieId: 1234,
+    actorId: 6789,
     actorName: "Joe Bloggs",
     roleName: "Male Character 1",
     roleDescription: "Main protagonist — a witty and determined hero.",
   },
   {
     movieId: 1234,
+    actorId: 6790,
     actorName: "Alice Broggs",
     roleName: "Female Character 1",
     roleDescription: "Strong supporting lead who helps Joe in his journey.",
   },
   {
     movieId: 1234,
+    actorId: 6791,
     actorName: "Joe Cloggs",
     roleName: "Male Character 2",
     roleDescription: "Comic relief sidekick who often causes trouble.",
   },
   {
     movieId: 2345,
+    actorId: 7001,
     actorName: "Maggie Wells",
     roleName: "Lead Investigator",
     roleDescription: "Determined detective trying to solve a mysterious case.",
   },
   {
     movieId: 2345,
+    actorId: 7002,
     actorName: "Matteo Mary",
     roleName: "Antagonist",
     roleDescription: "Cunning villain with hidden motives.",
   },
 ];
+
 
 
 

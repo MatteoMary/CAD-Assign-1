@@ -1,49 +1,35 @@
 import {
-  APIGatewayRequestAuthorizerEvent,
   APIGatewayAuthorizerEvent,
-  PolicyDocument,
   APIGatewayProxyEvent,
+  APIGatewayRequestAuthorizerEvent,
+  PolicyDocument,
   StatementEffect,
 } from "aws-lambda";
+import axios from "axios";
+import jwt, { JwtHeader, JwtPayload } from "jsonwebtoken";
+import jwkToPem, { JWK } from "jwk-to-pem";
 
-import axios from "axios"
-//const jwkToPem = require("jwk-to-pem");
-//const jwt = require("jsonwebtoken");
-import jwt from 'jsonwebtoken'
-import jwkToPem from "jwk-to-pem";
+type JwkWithKid = JWK & { kid?: string };
 
 export type CookieMap = { [key: string]: string } | undefined;
-export type JwtToken = { sub: string; email: string } | null;
-export type Jwk = {
-  keys: {
-    alg: string;
-    e: string;
-    kid: string;
-    kty: string;
-    n: string;
-    use: string;
-  }[];
-};
 
 export const parseCookies = (
   event: APIGatewayRequestAuthorizerEvent | APIGatewayProxyEvent
-) => {
-  if (!event.headers || !event.headers.Cookie) {
-    return undefined;
+): CookieMap => {
+  const headers = (event as any).headers || {};
+  const cookieHeader: string | undefined =
+    headers.cookie || headers.Cookie || headers.COOKIE;
+  if (!cookieHeader) return undefined;
+
+  const map: Record<string, string> = {};
+  for (const part of cookieHeader.split(";")) {
+    const [k, ...rest] = part.trim().split("=");
+    map[k] = rest.join("=");
   }
-
-  const cookiesStr = event.headers.Cookie;
-  const cookiesArr = cookiesStr.split(";");
-
-  const cookieMap: CookieMap = {};
-
-  for (let cookie of cookiesArr) {
-    const cookieSplit = cookie.trim().split("=");
-    cookieMap[cookieSplit[0]] = cookieSplit[1];
-  }
-
-  return cookieMap;
+  return map;
 };
+
+export type JwtToken = ({ sub?: string; email?: string } & JwtPayload) | null;
 
 export const verifyToken = async (
   token: string,
@@ -51,13 +37,30 @@ export const verifyToken = async (
   region: string
 ): Promise<JwtToken> => {
   try {
-    const url = `https://cognito-idp.${region}.amazonaws.com/${userPoolId}/.well-known/jwks.json`;
-    const { data }: { data: Jwk } = await axios.get(url);
-    const pem = jwkToPem(data.keys[0]);
+    if (!token || !userPoolId || !region) return null;
 
-    return jwt.verify(token, pem, { algorithms: ["RS256"] });
+    const decoded = jwt.decode(token, { complete: true }) as
+      | { header: JwtHeader; payload: JwtPayload }
+      | null;
+    if (!decoded || !decoded.header?.kid) return null;
+    const kid = decoded.header.kid;
+
+    const jwksUrl = `https://cognito-idp.${region}.amazonaws.com/${userPoolId}/.well-known/jwks.json`;
+    const { data } = await axios.get<{ keys: JwkWithKid[] }>(jwksUrl);
+
+      const jwk = data.keys.find((k) => k.kid === kid) ?? data.keys[0];
+    if (!jwk) return null
+
+    const pem = jwkToPem(jwk);
+
+    const verified = jwt.verify(token, pem, {
+      algorithms: ["RS256"],
+      issuer: `https://cognito-idp.${region}.amazonaws.com/${userPoolId}`,
+    }) as JwtPayload;
+
+    return verified as JwtToken;
   } catch (err) {
-    console.log(err);
+    console.error("[verifyToken error]", err);
     return null;
   }
 };
@@ -65,15 +68,9 @@ export const verifyToken = async (
 export const createPolicy = (
   event: APIGatewayAuthorizerEvent,
   effect: StatementEffect
-): PolicyDocument => {
-  return {
-    Version: "2012-10-17",
-    Statement: [
-      {
-        Effect: effect,
-        Action: "execute-api:Invoke",
-        Resource: [event.methodArn],
-      },
-    ],
-  };
-};
+): PolicyDocument => ({
+  Version: "2012-10-17",
+  Statement: [
+    { Effect: effect, Action: "execute-api:Invoke", Resource: [event.methodArn] }
+  ]
+});

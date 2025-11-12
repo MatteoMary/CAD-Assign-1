@@ -1,77 +1,84 @@
-import { APIGatewayProxyHandlerV2 } from "aws-lambda";
+import { APIGatewayProxyHandler } from "aws-lambda";
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { DynamoDBDocumentClient, PutCommand } from "@aws-sdk/lib-dynamodb";
 import Ajv from "ajv";
 import schema from "../shared/types.schema.json";
 
-const ajv = new Ajv();
+const ajv = new Ajv({ allErrors: true, removeAdditional: "failing" });
 const isValidBodyParams = ajv.compile(schema.definitions["Movie"] || {});
 
-const ddbDocClient = createDDbDocClient();
+const ddb = DynamoDBDocumentClient.from(
+  new DynamoDBClient({ region: process.env.REGION }),
+  {
+    marshallOptions: {
+      convertEmptyValues: true,
+      removeUndefinedValues: true,
+      convertClassInstanceToMap: true,
+    },
+    unmarshallOptions: { wrapNumbers: false },
+  }
+);
 
-export const handler: APIGatewayProxyHandlerV2 = async (event, context) => {
+const json = (statusCode: number, body: unknown) => ({
+  statusCode,
+  headers: {
+    "content-type": "application/json",
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Credentials": "true",
+  },
+  body: JSON.stringify(body),
+});
+
+export const handler: APIGatewayProxyHandler = async (event) => {
   try {
-    // Print Event
-    console.log("[EVENT]", JSON.stringify(event));
+    console.log("[POST MOVIE EVENT]", JSON.stringify(event));
+    const adminKeyId =
+      event.requestContext?.identity?.apiKeyId ||
+      event.headers?.["x-api-key"] ||
+      "admin";
+
     const body = event.body ? JSON.parse(event.body) : undefined;
-    if (!body) {
-      return {
-        statusCode: 500,
-        headers: {
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({ message: "Missing request body" }),
-      };
-    }
 
+    if (!body) return json(400, { message: "Missing request body" });
     if (!isValidBodyParams(body)) {
-      return {
-        statusCode: 500,
-        headers: {
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({
-          message: `Incorrect type. Must match Movie schema`,
-          schema: schema.definitions["Movie"],
-        }),
-      };
+      return json(400, {
+        message: "Incorrect type. Must match Movie schema",
+        errors: isValidBodyParams.errors ?? [],
+      });
     }
 
-    const commandOutput = await ddbDocClient.send(
+    const { id: movieId, title, release_date, overview } = body;
+
+    if (typeof movieId !== "number" || !title) {
+      return json(400, {
+        message: "Movie 'id':number and 'title':string are required",
+      });
+    }
+
+    const item = {
+      PK: `m${movieId}`,
+      SK: "xxxx",
+      title: String(title),
+      releaseDate: String(release_date ?? ""),
+      overview: String(overview ?? ""),
+    };
+
+    await ddb.send(
       new PutCommand({
         TableName: process.env.TABLE_NAME,
-        Item: body,
+        Item: item,
+        ConditionExpression: "attribute_not_exists(PK)",
       })
     );
-    return {
-      statusCode: 201,
-      headers: {
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({ message: "Movie added" }),
-    };
+
+    console.log(`admin(${adminKeyId}) /movies POST`);
+
+    return json(201, { message: "Movie added", movieId });
   } catch (error: any) {
-    console.log(JSON.stringify(error));
-    return {
-      statusCode: 500,
-      headers: {
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({ error }),
-    };
+    if (error?.name === "ConditionalCheckFailedException") {
+      return json(409, { message: "Movie already exists" });
+    }
+    console.error("[POST MOVIE ERROR]", error);
+    return json(500, { message: "Failed to add movie" });
   }
 };
-
-function createDDbDocClient() {
-  const ddbClient = new DynamoDBClient({ region: process.env.REGION });
-  const marshallOptions = {
-    convertEmptyValues: true,
-    removeUndefinedValues: true,
-    convertClassInstanceToMap: true,
-  };
-  const unmarshallOptions = {
-    wrapNumbers: false,
-  };
-  const translateConfig = { marshallOptions, unmarshallOptions };
-  return DynamoDBDocumentClient.from(ddbClient, translateConfig);
-}

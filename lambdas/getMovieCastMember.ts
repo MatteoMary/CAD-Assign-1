@@ -1,114 +1,50 @@
 import { APIGatewayProxyHandlerV2 } from "aws-lambda";
-import type { MovieCastMemberQueryParams } from "../shared/types";
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
-import {
-  DynamoDBDocumentClient,
-  QueryCommand,
-  QueryCommandInput,
-} from "@aws-sdk/lib-dynamodb";
-import Ajv from "ajv";
-import schema from "../shared/types.schema.json";
+import { DynamoDBDocumentClient, GetCommand } from "@aws-sdk/lib-dynamodb";
 
-const ajv = new Ajv();
-const isValidQueryParams = ajv.compile<MovieCastMemberQueryParams>(
-  (schema as any).definitions?.MovieCastMemberQueryParams ?? {}
-);
+const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({ region: process.env.REGION }), {
+  marshallOptions: { convertEmptyValues: true, removeUndefinedValues: true, convertClassInstanceToMap: true },
+  unmarshallOptions: { wrapNumbers: false },
+});
 
-//DDB client
-const ddbDocClient = createDocumentClient();
-
-// Handler
-export const handler: APIGatewayProxyHandlerV2 = async (event, context) => {
+export const handler: APIGatewayProxyHandlerV2 = async (event) => {
   try {
-    console.log("[EVENT]", JSON.stringify(event));
-    const queryParams = event.queryStringParameters;
+    console.log("[GET CAST MEMBER EVENT]", JSON.stringify(event));
 
-    if (!queryParams) {
-      return {
-        statusCode: 400,
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ message: "Missing query parameters" }),
-      };
-    }
+    const movieIdStr = event.pathParameters?.movieId;
+    const actorIdStr = event.pathParameters?.actorId;
+    if (!movieIdStr || !/^\d+$/.test(movieIdStr)) return json(400, { message: "Invalid or missing movieId" });
+    if (!actorIdStr || !/^\d+$/.test(actorIdStr)) return json(400, { message: "Invalid or missing actorId" });
 
-    if (!isValidQueryParams(queryParams as any)) {
-      return {
-        statusCode: 400, 
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          message: `Incorrect type. Must match Query parameters schema`,
-          schema: (schema as any).definitions?.MovieCastMemberQueryParams, // TS7053 fix
-        }),
-      };
-    }
+    const out = await ddb.send(
+      new GetCommand({
+        TableName: process.env.TABLE_NAME,
+        Key: { PK: `c${movieIdStr}`, SK: `${actorIdStr}` },
+      })
+    );
 
-    const movieIdStr = (queryParams as MovieCastMemberQueryParams).movieId;
-    if (!/^\d+$/.test(movieIdStr)) {
-      return {
-        statusCode: 400,
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ message: "movieId must be a numeric string" }),
-      };
-    }
-    const movieId = parseInt(movieIdStr, 10);
+    logRequester(event, `/movies/${movieIdStr}/actors/${actorIdStr}`);
 
-    let commandInput: QueryCommandInput = {
-      TableName: process.env.CAST_TABLE_NAME,
-    };
-
-    if ("roleName" in queryParams && queryParams.roleName) {
-      commandInput = {
-        ...commandInput,
-        IndexName: "roleIx",
-        KeyConditionExpression: "movieId = :m and begins_with(roleName, :r) ",
-        ExpressionAttributeValues: {
-          ":m": movieId,
-          ":r": queryParams.roleName,
-        },
-      };
-    } else if ("actorName" in queryParams && queryParams.actorName) {
-      commandInput = {
-        ...commandInput,
-        KeyConditionExpression: "movieId = :m and begins_with(actorName, :a) ",
-        ExpressionAttributeValues: {
-          ":m": movieId,
-          ":a": queryParams.actorName,
-        },
-      };
-    } else {
-      commandInput = {
-        ...commandInput,
-        KeyConditionExpression: "movieId = :m",
-        ExpressionAttributeValues: { ":m": movieId },
-      };
-    }
-
-    const commandOutput = await ddbDocClient.send(new QueryCommand(commandInput));
-
-    return {
-      statusCode: 200,
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ data: commandOutput.Items }),
-    };
-  } catch (error: any) {
-    console.log(JSON.stringify(error));
-    return {
-      statusCode: 500,
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ error }),
-    };
+    if (!out.Item) return json(404, { message: "Cast member not found" });
+    return json(200, { data: out.Item });
+  } catch (error) {
+    console.error("[GET CAST MEMBER ERROR]", error);
+    return json(500, { error: "Internal Server Error" });
   }
 };
 
-// Helper
-function createDocumentClient() {
-  const ddbClient = new DynamoDBClient({ region: process.env.REGION });
-  const marshallOptions = {
-    convertEmptyValues: true,
-    removeUndefinedValues: true,
-    convertClassInstanceToMap: true,
+function json(statusCode: number, body: unknown) {
+  return {
+    statusCode,
+    headers: { "content-type": "application/json", "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Credentials": "true" },
+    body: JSON.stringify(body),
   };
-  const unmarshallOptions = { wrapNumbers: false };
-  const translateConfig = { marshallOptions, unmarshallOptions };
-  return DynamoDBDocumentClient.from(ddbClient, translateConfig);
+}
+
+function logRequester(event: any, path: string) {
+  const u =
+    event.requestContext?.authorizer?.context?.username ??
+    event.requestContext?.authorizer?.claims?.["cognito:username"] ??
+    "unknown";
+  console.log(`${u} ${path}`);
 }

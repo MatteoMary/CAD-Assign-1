@@ -1,183 +1,131 @@
 import * as cdk from "aws-cdk-lib";
-import * as lambdanode from "aws-cdk-lib/aws-lambda-nodejs";
-import * as lambda from "aws-cdk-lib/aws-lambda";
-import * as dynamodb from "aws-cdk-lib/aws-dynamodb";
-import * as custom from "aws-cdk-lib/custom-resources";
-import * as apig from "aws-cdk-lib/aws-apigateway";
 import { Construct } from "constructs";
-// import * as sqs from 'aws-cdk-lib/aws-sqs';
-import { generateBatch } from "../shared/util";
-import { movies, movieCasts } from "../seed/movies";
+import * as apig from "aws-cdk-lib/aws-apigateway";
+import * as dynamodb from "aws-cdk-lib/aws-dynamodb";
+import * as lambda from "aws-cdk-lib/aws-lambda";
+import * as node from "aws-cdk-lib/aws-lambda-nodejs";
+import * as logs from "aws-cdk-lib/aws-logs";
+import * as custom from "aws-cdk-lib/custom-resources";
 
 export class RestAPIStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
 
-    // Tables 
-    const moviesTable = new dynamodb.Table(this, "MoviesTable", {
+    // Single-table
+    const table = new dynamodb.Table(this, "MoviesSingleTable", {
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
-      partitionKey: { name: "id", type: dynamodb.AttributeType.NUMBER },
+      partitionKey: { name: "PK", type: dynamodb.AttributeType.STRING },
+      sortKey: { name: "SK", type: dynamodb.AttributeType.STRING },
+      stream: dynamodb.StreamViewType.NEW_AND_OLD_IMAGES,
       removalPolicy: cdk.RemovalPolicy.DESTROY,
-      tableName: "Movies",
+      tableName: "MoviesSingleTable",
     });
 
-    const movieCastsTable = new dynamodb.Table(this, "MovieCastTable", {
-      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
-      partitionKey: { name: "movieId", type: dynamodb.AttributeType.NUMBER },
-      sortKey: { name: "actorName", type: dynamodb.AttributeType.STRING },
-      removalPolicy: cdk.RemovalPolicy.DESTROY,
-      tableName: "MovieCast",
- });
-
-    movieCastsTable.addLocalSecondaryIndex({
-      indexName: "roleIx",
-      sortKey: { name: "roleName", type: dynamodb.AttributeType.STRING },
- });
-
-    
-    // Functions 
-const getMovieCastMembersFn = new lambdanode.NodejsFunction(
-      this,
-      "GetCastMemberFn",
-      {
-        architecture: lambda.Architecture.ARM_64,
-        runtime: lambda.Runtime.NODEJS_18_X,
-        entry: `${__dirname}/../lambdas/getMovieCastMember.ts`,
-        timeout: cdk.Duration.seconds(10),
-        memorySize: 128,
-        environment: {
-          CAST_TABLE_NAME: movieCastsTable.tableName,
-          MOVIES_TABLE_NAME: moviesTable.tableName,
-          REGION: cdk.Aws.REGION,
-        },
-      }
- );
-
-const newMovieFn = new lambdanode.NodejsFunction(this, "AddMovieFn", {
+    const envCommon = { TABLE_NAME: table.tableName, REGION: cdk.Aws.REGION };
+    const defaults = {
       architecture: lambda.Architecture.ARM_64,
       runtime: lambda.Runtime.NODEJS_18_X,
-      entry: `${__dirname}/../lambdas/addMovie.ts`,
       timeout: cdk.Duration.seconds(10),
       memorySize: 128,
-      environment: {
-        TABLE_NAME: moviesTable.tableName,
-        REGION: cdk.Aws.REGION,
+      handler: "handler",
+      logRetention: logs.RetentionDays.ONE_WEEK,
+      environment: envCommon,
+    } as const;
+
+    // Lambdas
+    const getMovie = new node.NodejsFunction(this, "GetMovieFn", { ...defaults, entry: `${__dirname}/../lambdas/getMovieById.ts` });
+    const getMovieActors = new node.NodejsFunction(this, "GetMovieActorsFn", { ...defaults, entry: `${__dirname}/../lambdas/getMovieCastMembers.ts` });
+    const getMovieActor = new node.NodejsFunction(this, "GetMovieActorFn", { ...defaults, entry: `${__dirname}/../lambdas/getMovieCastMember.ts` });
+    const getAwards = new node.NodejsFunction(this, "GetAwardsFn", { ...defaults, entry: `${__dirname}/../lambdas/getAwards.ts` });
+    const postMovie = new node.NodejsFunction(this, "PostMovieFn", { ...defaults, entry: `${__dirname}/../lambdas/addMovie.ts` });
+    const deleteMovie = new node.NodejsFunction(this, "DeleteMovieFn", { ...defaults, entry: `${__dirname}/../lambdas/deleteMovie.ts` });
+
+    table.grantReadData(getMovie);
+    table.grantReadData(getMovieActors);
+    table.grantReadData(getMovieActor);
+    table.grantReadData(getAwards);
+    table.grantWriteData(postMovie);
+    table.grantWriteData(deleteMovie);
+
+    const stateLogger = new node.NodejsFunction(this, "StateChangeLoggerFn", { ...defaults, entry: `${__dirname}/../lambdas/events/stateChangeLogger.ts` });
+    table.grantStreamRead(stateLogger);
+    stateLogger.addEventSourceMapping("DdbStreamMapping", {
+      eventSourceArn: table.tableStreamArn!,
+      startingPosition: lambda.StartingPosition.LATEST,
+      batchSize: 10,
+      enabled: true,
+    });
+
+    // API
+    const api = new apig.RestApi(this, "AppRestApi", {
+      description: "Movie App API (spec-compliant)",
+      deployOptions: { stageName: "dev", loggingLevel: apig.MethodLoggingLevel.INFO, dataTraceEnabled: false, metricsEnabled: true },
+      defaultCorsPreflightOptions: {
+        allowOrigins: apig.Cors.ALL_ORIGINS,
+        allowMethods: ["OPTIONS", "GET", "POST", "DELETE"],
+        allowHeaders: apig.Cors.DEFAULT_HEADERS,
+        allowCredentials: true,
       },
     });
 
-    const getMovieByIdFn = new lambdanode.NodejsFunction(
-      this,
-      "GetMovieByIdFn",
-      {
-        architecture: lambda.Architecture.ARM_64,
-        runtime: lambda.Runtime.NODEJS_18_X,
-        entry: `${__dirname}/../lambdas/getMovieById.ts`,
-        timeout: cdk.Duration.seconds(10),
-        memorySize: 128,
-        environment: {
-          TABLE_NAME: moviesTable.tableName,
-          REGION: cdk.Aws.REGION,
-        },
-      }
-      );
-      
-      const getAllMoviesFn = new lambdanode.NodejsFunction(
-        this,
-        "GetAllMoviesFn",
-        {
-          architecture: lambda.Architecture.ARM_64,
-          runtime: lambda.Runtime.NODEJS_18_X,
-          entry: `${__dirname}/../lambdas/getAllMovies.ts`,
-          timeout: cdk.Duration.seconds(10),
-          memorySize: 128,
-          environment: {
-            TABLE_NAME: moviesTable.tableName,
-            REGION: cdk.Aws.REGION,
-          },
-        }
-        );
+    const authorizerFn = new node.NodejsFunction(this, "RequestAuthorizerFn", {
+      ...defaults,
+      entry: `${__dirname}/../lambdas/auth/authorizer.ts`,
+      environment: { ...envCommon, USER_POOL_ID: process.env.USER_POOL_ID ?? "", CLIENT_ID: process.env.CLIENT_ID ?? "" },
+    });
+    const requestAuthorizer = new apig.RequestAuthorizer(this, "CookieRequestAuthorizer", {
+      identitySources: [apig.IdentitySource.header("cookie")],
+      handler: authorizerFn,
+      resultsCacheTtl: cdk.Duration.minutes(0),
+    });
 
-        const deleteMovieFn = new lambdanode.NodejsFunction(
-          this,
-          "DeleteMovieFn", 
-          {
-         architecture: lambda.Architecture.ARM_64,
-         runtime: lambda.Runtime.NODEJS_18_X,
-         entry: `${__dirname}/../lambdas/deleteMovie.ts`,
-         timeout: cdk.Duration.seconds(10),
-         memorySize: 128,
-         environment: {
-          TABLE_NAME: moviesTable.tableName,
-          REGION: cdk.Aws.REGION,
-  },
-});
-        
-            new custom.AwsCustomResource(this, "moviesddbInitData", {
+    const apiKey = api.addApiKey("AdminApiKey");
+    const plan = api.addUsagePlan("AdminPlan", { apiStages: [{ api, stage: api.deploymentStage }] });
+    plan.addApiKey(apiKey);
+
+    const addGet = (res: apig.IResource, fn: lambda.Function) =>
+      res.addMethod("GET", new apig.LambdaIntegration(fn), { authorizer: requestAuthorizer, authorizationType: apig.AuthorizationType.CUSTOM });
+
+    const addAdminWrite = (res: apig.IResource, method: "POST" | "DELETE", fn: lambda.Function) =>
+      res.addMethod(method, new apig.LambdaIntegration(fn), { apiKeyRequired: true });
+
+    const movies = api.root.addResource("movies");
+    const movieId = movies.addResource("{movieId}");
+    const actors = movieId.addResource("actors");
+    const actorId = actors.addResource("{actorId}");
+    const awards = api.root.addResource("awards");
+
+    addGet(movieId, getMovie);          // GET /movies/{movieId}
+    addGet(actors, getMovieActors);     // GET /movies/{movieId}/actors
+    addGet(actorId, getMovieActor);     // GET /movies/{movieId}/actors/{actorId}
+    addGet(awards, getAwards);          // GET /awards?movie=&actor=&awardBody=
+
+    addAdminWrite(movies, "POST", postMovie);   // POST /movies
+    addAdminWrite(movieId, "DELETE", deleteMovie); // DELETE /movies/{movieId}
+
+    const seed = new custom.AwsCustomResource(this, "SingleTableSeed", {
       onCreate: {
         service: "DynamoDB",
         action: "batchWriteItem",
         parameters: {
           RequestItems: {
-            [moviesTable.tableName]: generateBatch(movies),
-            [movieCastsTable.tableName]: generateBatch(movieCasts),
- },
- },
-        physicalResourceId: custom.PhysicalResourceId.of("moviesddbInitData"),
- },
-      policy: custom.AwsCustomResourcePolicy.fromSdkCalls({
-        resources: [moviesTable.tableArn, movieCastsTable.tableArn],
- }),
- });
-
-        
-        // Permissions 
-        moviesTable.grantReadData(getMovieByIdFn)
-        moviesTable.grantReadData(getAllMoviesFn)
-        moviesTable.grantReadWriteData(newMovieFn)
-        moviesTable.grantReadWriteData(deleteMovieFn);
-        movieCastsTable.grantReadData(getMovieCastMembersFn);
-        moviesTable.grantReadData(getMovieCastMembersFn);
-
-
-        
-        const api = new apig.RestApi(this, "RestAPI", {
-      description: "demo api",
-      deployOptions: {
-        stageName: "dev",
+            [table.tableName]: [
+              { PutRequest: { Item: { PK: { S: "m1234" }, SK: { S: "xxxx" }, title: { S: "The Shawshank Redemption" }, releaseDate: { S: "05-03-1995" }, overview: { S: "A banker convicted of uxoricide forms a friendship over a quarter century with a hardened convict …" } } } },
+              { PutRequest: { Item: { PK: { S: "a6789" }, SK: { S: "xxxx" }, name: { S: "Morgan Freeman" }, bio: { S: "Born in Memphis, Tennessee. After serving in the U.S. Air Force, he began his acting career in New York, gaining early recognition on the children’s show The Electric Company …" }, dob: { S: "01-06-1937" } } } },
+              { PutRequest: { Item: { PK: { S: "c1234" }, SK: { S: "6789" }, roleName: { S: "Ellis Redding" }, roleDesc: { S: "A contraband smuggler serving a life sentence. Red is being interviewed for parole after having spent 20 years at Shawshank for murder …" } } } },
+              { PutRequest: { Item: { PK: { S: "w1234" }, SK: { S: "Academy" }, category: { S: "Best Movie" }, year: { N: "1995" } } } },
+              { PutRequest: { Item: { PK: { S: "w6789" }, SK: { S: "GoldenGlobe" }, category: { S: "Best Supporting Actor" }, year: { N: "1995" } } } }
+            ],
+          },
+        },
+        physicalResourceId: custom.PhysicalResourceId.of("SingleTableSeed_v1"),
       },
-      defaultCorsPreflightOptions: {
-        allowHeaders: ["Content-Type", "X-Amz-Date"],
-        allowMethods: ["OPTIONS", "GET", "POST", "PUT", "PATCH", "DELETE"],
-        allowCredentials: true,
-        allowOrigins: ["*"],
-      },
+      policy: custom.AwsCustomResourcePolicy.fromSdkCalls({ resources: [table.tableArn] }),
     });
+    seed.node.addDependency(table);
 
-    const moviesEndpoint = api.root.addResource("movies");
-    moviesEndpoint.addMethod(
-      "GET",
-      new apig.LambdaIntegration(getAllMoviesFn, { proxy: true })
-    )
-
-const movieEndpoint = moviesEndpoint.addResource("{movieId}");
-    movieEndpoint.addMethod(
-      "GET",
-      new apig.LambdaIntegration(getMovieByIdFn, { proxy: true })
-    );
-moviesEndpoint.addMethod(
-      "POST",
-      new apig.LambdaIntegration(newMovieFn, { proxy: true })
-    );
-    movieEndpoint.addMethod(
-  "DELETE",
-  new apig.LambdaIntegration(deleteMovieFn, { proxy: true })
-);
-const movieCastEndpoint = moviesEndpoint.addResource("cast");
-movieCastEndpoint.addMethod(
-    "GET",
-    new apig.LambdaIntegration(getMovieCastMembersFn, { proxy: true })
-);
-
-      }
-    }
-    
+    new cdk.CfnOutput(this, "TableName", { value: table.tableName });
+    new cdk.CfnOutput(this, "ApiUrl", { value: api.url });
+    new cdk.CfnOutput(this, "AdminApiKeyId", { value: apiKey.keyId });
+  }
+}

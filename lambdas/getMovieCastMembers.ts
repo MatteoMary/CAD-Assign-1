@@ -1,75 +1,44 @@
 import { APIGatewayProxyHandlerV2, APIGatewayProxyResultV2 } from "aws-lambda";
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
-import {
-  DynamoDBDocumentClient,
-  QueryCommand,
-  QueryCommandInput,
-  GetCommand,
-  GetCommandInput,
-} from "@aws-sdk/lib-dynamodb";
+import { DynamoDBDocumentClient, QueryCommand, GetCommand } from "@aws-sdk/lib-dynamodb";
 
-const ddb = createDocumentClient();
+const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({ region: process.env.REGION }), {
+  marshallOptions: { convertEmptyValues: true, removeUndefinedValues: true, convertClassInstanceToMap: true },
+  unmarshallOptions: { wrapNumbers: false },
+});
 
 export const handler: APIGatewayProxyHandlerV2 = async (event): Promise<APIGatewayProxyResultV2> => {
   try {
-    console.log("Event:", JSON.stringify(event));
-    const qs = event.queryStringParameters ?? {};
+    console.log("[GET MOVIE ACTORS EVENT]", JSON.stringify(event));
 
-    if (!qs.movieId) return json(400, { message: "Missing movieId parameter" });
-    const movieId = Number(qs.movieId);
-    if (!Number.isFinite(movieId)) return json(400, { message: "Invalid movieId parameter" });
+    const movieIdStr = event.pathParameters?.movieId ?? event.queryStringParameters?.movieId;
+    if (!movieIdStr || !/^\d+$/.test(movieIdStr)) return json(400, { message: "Invalid or missing movieId" });
 
-    let input: QueryCommandInput = {
-      TableName: process.env.CAST_TABLE_NAME,
-    };
+    const castOut = await ddb.send(
+      new QueryCommand({
+        TableName: process.env.TABLE_NAME,
+        KeyConditionExpression: "PK = :pk",
+        ExpressionAttributeValues: { ":pk": `c${movieIdStr}` },
+      })
+    );
 
-    if (qs.roleName) {
-      input = {
-        ...input,
-        IndexName: "roleIx",
-        KeyConditionExpression: "movieId = :m AND begins_with(roleName, :r)",
-        ExpressionAttributeValues: { ":m": movieId, ":r": qs.roleName },
-      };
-    } else if (qs.actorName) {
-      input = {
-        ...input,
-        KeyConditionExpression: "movieId = :m AND begins_with(actorName, :a)",
-        ExpressionAttributeValues: { ":m": movieId, ":a": qs.actorName },
-      };
-    } else {
-      input = {
-        ...input,
-        KeyConditionExpression: "movieId = :m",
-        ExpressionAttributeValues: { ":m": movieId },
-      };
-    }
-
-    const castOut = await ddb.send(new QueryCommand(input));
     const response: any = { data: castOut.Items ?? [] };
 
-    const includeFacts = typeof qs.facts === "string" && qs.facts.toLowerCase() === "true";
+    const includeFacts = (event.queryStringParameters?.facts ?? "").toLowerCase() === "true";
     if (includeFacts) {
-      const getInput: GetCommandInput = {
-        TableName: process.env.MOVIES_TABLE_NAME,
-        Key: { id: movieId },
-        ProjectionExpression: "#t, #g, #o",
-        ExpressionAttributeNames: {
-          "#t": "title",
-          "#g": "genre_ids",
-          "#o": "overview",
-        },
-      };
-      const movieOut = await ddb.send(new GetCommand(getInput));
-      if (movieOut.Item) {
-        response.facts = movieOut.Item; 
-      } else {
-        response.facts = null;
-      }
+      const movieOut = await ddb.send(
+        new GetCommand({
+          TableName: process.env.TABLE_NAME,
+          Key: { PK: `m${movieIdStr}`, SK: "xxxx" },
+        })
+      );
+      response.facts = movieOut.Item ?? null;
     }
 
+    logRequester(event, `/movies/${movieIdStr}/actors${includeFacts ? "?facts=true" : ""}`);
     return json(200, response);
   } catch (err) {
-    console.log("Error:", JSON.stringify(err));
+    console.error("[GET MOVIE ACTORS ERROR]", err);
     return json(500, { error: "Internal Server Error" });
   }
 };
@@ -77,15 +46,15 @@ export const handler: APIGatewayProxyHandlerV2 = async (event): Promise<APIGatew
 function json(statusCode: number, body: unknown): APIGatewayProxyResultV2 {
   return {
     statusCode,
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Credentials": "true" },
     body: JSON.stringify(body),
   };
 }
 
-function createDocumentClient() {
-  const client = new DynamoDBClient({ region: process.env.REGION });
-  return DynamoDBDocumentClient.from(client, {
-    marshallOptions: { convertEmptyValues: true, removeUndefinedValues: true, convertClassInstanceToMap: true },
-    unmarshallOptions: { wrapNumbers: false },
-  });
+function logRequester(event: any, path: string) {
+  const u =
+    event.requestContext?.authorizer?.context?.username ??
+    event.requestContext?.authorizer?.claims?.["cognito:username"] ??
+    "unknown";
+  console.log(`${u} ${path}`);
 }

@@ -4,7 +4,7 @@ import {
   CognitoIdentityProviderClient,
   SignUpCommand,
   SignUpCommandInput,
-} from "@aws-sdk/client-cognito-identity-provider"; // ES Modules import
+} from "@aws-sdk/client-cognito-identity-provider";
 import Ajv from "ajv";
 import schema from "../../shared/types.schema.json";
 

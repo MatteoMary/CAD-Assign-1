@@ -1,9 +1,5 @@
 import type { APIGatewayProxyEventV2, APIGatewayProxyEvent } from "aws-lambda";
 
-/**
- * Logs: "<username> <path and query>"
- * Works with both REST (v1) and HTTP API (v2) events.
- */
 export function logRequest(event: APIGatewayProxyEvent | APIGatewayProxyEventV2) {
   const username =
     (event as any)?.requestContext?.authorizer?.username ||

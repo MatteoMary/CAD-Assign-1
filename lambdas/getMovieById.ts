@@ -1,7 +1,7 @@
-// lambdas/getMovieById.ts
 import { APIGatewayProxyHandlerV2 } from "aws-lambda";
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { DynamoDBDocumentClient, GetCommand } from "@aws-sdk/lib-dynamodb";
+import { logRequest } from "../shared/request-logger";  
 
 const ddb = DynamoDBDocumentClient.from(
   new DynamoDBClient({ region: process.env.REGION }),
@@ -24,7 +24,10 @@ function json(status: number, body: unknown) {
 }
 
 export const handler: APIGatewayProxyHandlerV2 = async (event) => {
+    logRequest(event);
+
   try {
+    console.log("Event:", JSON.stringify(event));
 
     const movieIdStr =
       event.pathParameters?.movieId ??

@@ -1,14 +1,56 @@
-# Welcome to your CDK TypeScript project
+## Assignment - Cloud App Development.
 
-This is a blank project for CDK development with TypeScript.
+__Name:__ Matteo Mary
 
-The `cdk.json` file tells the CDK Toolkit how to execute your app.
+### Links.
+__Demo:__ A link to your YouTube video demonstration.
 
-## Useful commands
+https://github.com/MatteoMary/CAD-Assign-1
 
-* `npm run build`   compile typescript to js
-* `npm run watch`   watch for changes and compile
-* `npm run test`    perform the jest unit tests
-* `npx cdk deploy`  deploy this stack to your default AWS account/region
-* `npx cdk diff`    compare deployed stack with current state
-* `npx cdk synth`   emits the synthesized CloudFormation template
+### Screenshots.
+
+[A screenshot of the App Web API from the management console, e.g.
+
+![][api]
+
+The Auth API is not required as its code was provided in the labs.
+
+]
+
+[A screenshot of your seeded table from DynamoDB, e.g.
+
+![][db]
+]
+
+[A screenshot from CloudWatch logs showing an example of User Activity logging, e.g.
+
+[log]
+]
+### Design features (if required).
+
+Design features
+
+This API was built using the AWS CDK and follows a clean, modular serverless design.
+Design features include:
+
+Single-table DynamoDB design:
+All movie, actor, cast, and award data is stored in one table using prefixed partition keys (m, a, c, w) and sort keys.
+
+Separated Lambda functions:
+Each endpoint uses its own dedicated Lambda function, keeping business logic isolated and easier to test and maintain.
+
+Request authorizer:
+A custom Lambda authorizer is used to validate Cognito users for all GET requests.
+
+API key secured admin routes:
+POST and DELETE operations require an API key through an API Gateway usage plan, separating normal users from admin users.
+
+CDK-managed infrastructure:
+All resources including tables, Lambdas, authorizers, API Gateway routes and IAM permissions are provisioned using CDK for reproducibility and consistent deployment.
+###  Extra (If relevant).
+
+N/A
+
+[api]: /images/Screenshot%202025-11-12%20235538.png
+[db]: /images/Screenshot%202025-11-13%20001443.png
+[log]: /images/Screenshot%202025-11-13%20011242.png

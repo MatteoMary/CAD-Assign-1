@@ -1,15 +1,8 @@
-// lambdas/events/stateChangeLogger.ts
 import { DynamoDBStreamHandler, DynamoDBRecord } from "aws-lambda";
 import { AttributeValue } from "@aws-sdk/client-dynamodb";
 import { unmarshall } from "@aws-sdk/util-dynamodb";
 
-/**
- * Logs DB state changes to CloudWatch in the formats required by the brief:
- *  DELETE m1234 | xxxx | Title | 05-03-1995 | Overview...
- *  POST + w1234 | Academy | Best Movie | 1995
- *
- * Works for Movie (m), Actor (a), Cast (c), Award (w) items in a single-table.
- */
+
 export const handler: DynamoDBStreamHandler = async (event) => {
   for (const rec of event.Records) {
     try {
@@ -27,7 +20,7 @@ export const handler: DynamoDBStreamHandler = async (event) => {
 };
 
 function formatInsert(item: any): string {
-  // Expect PK like m1234 / a6789 / c1234 / w1234
+  // PK like m1234 / a6789 / c1234 / w1234
   const pk: string = item.PK || "";
   const sk: string = item.SK || "";
 
